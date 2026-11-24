@@ -12,6 +12,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import signal
 import socket
 from urllib.error import URLError
@@ -23,7 +24,7 @@ from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.error import Error
 from wyoming.info import Attribution, Describe, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncEventHandler, AsyncTcpServer
-from wyoming.tts import Synthesize, SynthesizeStart, SynthesizeStop, SynthesizeStopped
+from wyoming.tts import Synthesize, SynthesizeChunk, SynthesizeStart, SynthesizeStop, SynthesizeStopped
 
 MODEL_ID = "KittenML/kitten-tts-2-mini"
 PORT = 10500
@@ -65,6 +66,7 @@ class SynthesisService:
             installed=True,
             description="Kitten TTS 2 Mini",
             version=sdk_version,
+            supports_synthesize_streaming=True,
             voices=[
                 TtsVoice(
                     name=voice_id,
@@ -106,7 +108,7 @@ class SynthesisService:
 
 
 class WyomingHandler(AsyncEventHandler):
-    """Handle Describe and Synthesize requests on a Wyoming connection."""
+    """Handle Wyoming synthesis, including incremental text from Assist."""
 
     def __init__(self, reader, writer, *, service, executor, synthesis_lock):
         super().__init__(reader, writer)
@@ -114,20 +116,56 @@ class WyomingHandler(AsyncEventHandler):
         self.executor = executor
         self.synthesis_lock = synthesis_lock
         self.stream_started = False
+        self.stream_text = ""
+        self.stream_voice = None
+        self.received_chunks = False
+        self.audio_started = False
 
+    # Process complete sentences as text arrives; ignore the duplicate full request.
+    # Related files: requirements.txt, README.md.
     async def handle_event(self, event):
         if Describe.is_type(event.type):
             await self.write_event(self.service.info)
             return True
-        # Home Assistant also sends a complete Synthesize inside its streaming envelope.
         if SynthesizeStart.is_type(event.type):
             self.stream_started = True
+            self.stream_text = ""
+            self.received_chunks = False
+            self.audio_started = False
+            request = SynthesizeStart.from_event(event)
+            self.stream_voice = (request.voice and request.voice.name) or self.service.default_voice
+            if self.stream_voice not in self.service.voices:
+                await self.write_event(Error("Unknown voice", "invalid_request").event())
+                return False
+            return True
+        if SynthesizeChunk.is_type(event.type) and self.stream_started:
+            chunk = SynthesizeChunk.from_event(event).text
+            if not isinstance(chunk, str):
+                await self.write_event(Error("Invalid synthesis request", "invalid_request").event())
+                return False
+            self.received_chunks = True
+            self.stream_text += chunk
+            boundaries = list(re.finditer(r"[.!?。！？\n]+(?:\s+|$)", self.stream_text))
+            if boundaries:
+                end = boundaries[-1].end()
+                text, self.stream_text = self.stream_text[:end].strip(), self.stream_text[end:]
+                if text and not await self.send_audio(text, self.stream_voice):
+                    return False
             return True
         if SynthesizeStop.is_type(event.type) and self.stream_started:
             self.stream_started = False
+            if self.stream_text.strip():
+                if not await self.send_audio(self.stream_text.strip(), self.stream_voice):
+                    return False
+            if not self.audio_started:
+                await self.write_event(Error("Empty text", "invalid_request").event())
+                return False
+            await self.write_event(AudioStop().event())
             await self.write_event(SynthesizeStopped().event())
             return True
         if not Synthesize.is_type(event.type):
+            return True
+        if self.stream_started and self.received_chunks:
             return True
 
         try:
@@ -143,6 +181,19 @@ class WyomingHandler(AsyncEventHandler):
             await self.write_event(Error("Empty text or unknown voice", "invalid_request").event())
             return False
 
+        if self.stream_started:
+            self.stream_voice = voice_id
+            self.stream_text = text
+            return True
+
+        self.audio_started = False
+        if not await self.send_audio(text, voice_id):
+            return False
+        await self.write_event(AudioStop().event())
+        return True
+
+    async def send_audio(self, text, voice_id):
+        """Send model output incrementally while serializing access to the model."""
         audio_format = {"rate": self.service.model.sample_rate, "width": 2, "channels": 1}
         loop = asyncio.get_running_loop()
         async with self.synthesis_lock:
@@ -151,7 +202,12 @@ class WyomingHandler(AsyncEventHandler):
                 pcm = await loop.run_in_executor(self.executor, next, chunks, None)
                 if pcm is None:
                     raise RuntimeError("Model returned empty audio")
-                await self.write_event(AudioStart(**audio_format).event())
+                if not self.audio_started:
+                    await self.write_event(AudioStart(**audio_format).event())
+                    self.audio_started = True
+                else:
+                    silence = bytes(int(0.15 * self.service.model.sample_rate) * 2)
+                    await self.write_event(AudioChunk(audio=silence, **audio_format).event())
                 while pcm is not None:
                     for offset in range(0, len(pcm), 8192):
                         await self.write_event(AudioChunk(audio=pcm[offset:offset + 8192], **audio_format).event())
@@ -163,7 +219,6 @@ class WyomingHandler(AsyncEventHandler):
             finally:
                 # The executor owns the generator, including during cancellation.
                 await loop.run_in_executor(self.executor, chunks.close)
-        await self.write_event(AudioStop().event())
         return True
 
 
