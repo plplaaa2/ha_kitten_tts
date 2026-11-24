@@ -1,0 +1,4 @@
+kittenml==0.9.8
+wyoming==1.11.0
+# Misaki otherwise tries to install this model during the first English request.
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl

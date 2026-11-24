@@ -1,0 +1,24 @@
+name: Kitten TTS 2 Mini
+description: Local speech synthesis for Assist via Wyoming
+version: "0.1.0"
+slug: kitten_tts2_mini
+arch:
+  - amd64
+  - aarch64
+init: true
+startup: application
+boot: auto
+discovery:
+  - wyoming
+backup_exclude:
+  - "huggingface/**"
+options:
+  language: ko
+  voice: ""
+  speed: 1.0
+  debug_logging: false
+schema:
+  language: list(ko|en)
+  voice: str?
+  speed: float(0.5,2.0)
+  debug_logging: bool

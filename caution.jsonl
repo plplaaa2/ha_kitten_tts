@@ -1,0 +1,2 @@
+{"date":"2026-11-24","area":"runtime","note":"The kittenml package declares PyTorch and torchaudio even though the Mini acoustic model uses ONNX. Install CPU builds and verify both target architectures before publishing."}
+{"date":"2026-11-24","area":"english","note":"Install the spaCy English model during image build. Misaki attempts an installation at synthesis time and can terminate the process if its CLI fails."}
