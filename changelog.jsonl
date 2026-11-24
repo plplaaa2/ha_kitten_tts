@@ -1,2 +1,3 @@
 {"date":"2026-11-24","dev_version":1,"summary":"Add a local Home Assistant app serving Kitten TTS 2 Mini over Wyoming with Korean and English voices."}
 {"date":"2026-11-24","dev_version":2,"summary":"Stream synthesized audio chunks through Wyoming and serialize model requests."}
+{"date":"2026-11-24","dev_version":3,"summary":"Add Home Assistant repository metadata and app-store documentation, and clarify Assist audio buffering."}

@@ -4,6 +4,10 @@ Kitten TTS 2 Mini를 Home Assistant OS의 Assist에서 음성 합성 엔진으�
 
 ## 설치
 
+앱 스토어의 저장소 메뉴에 `https://github.com/plplaaa2/ha_kitten_tts#dev`를 추가하면 GitHub의 개발 브랜치에서 앱을 설치할 수 있습니다. 이후 앱을 시작하고 아래 4~5단계에 따라 Wyoming과 Assist를 설정합니다.
+
+로컬 앱으로 설치하려면 다음 단계를 사용합니다.
+
 1. 이 저장소 안의 `kitten_tts2_mini` 폴더를 Samba의 `local_apps` 공유 폴더 또는 Terminal & SSH의 `/local_apps/`에 복사합니다. 최종 경로는 `/local_apps/kitten_tts2_mini/config.yaml`입니다. 이전 버전에서는 로컬 앱 폴더가 `addons` 또는 `/addons/`로 표시될 수 있습니다.
 2. Home Assistant의 **설정 → 앱 → 앱 설치**에서 앱 목록을 새로고침한 뒤, **로컬 앱 → Kitten TTS 2 Mini → 설치**를 선택합니다.
 3. 앱을 시작한 뒤 로그에 `Wyoming listening`이 표시되는지 확인합니다. 이미지 빌드와 첫 시작 때는 인터넷 연결이 필요합니다. 앱은 시작할 때 한국어와 영어 합성을 준비하며, 모델 캐시는 `/data/huggingface`에 유지됩니다.
@@ -21,7 +25,7 @@ Kitten TTS 2 Mini를 Home Assistant OS의 Assist에서 음성 합성 엔진으�
 
 옵션을 저장한 뒤 앱을 재시작합니다. Assist에서 음성을 선택하면 해당 음성을 사용합니다.
 
-긴 응답은 전체 텍스트를 받은 후 모델이 생성한 오디오 조각부터 순서대로 전송합니다. 실제 재생 시작 시점은 Assist 클라이언트의 버퍼링 방식에 따라 달라집니다.
+긴 응답은 전체 텍스트를 받은 후 모델이 생성한 오디오 조각부터 순서대로 전송합니다. 현재 Home Assistant는 이 앱의 오디오를 모아서 처리하므로 Assist의 첫 재생까지 전체 합성을 기다립니다.
 
 ## 관련 문서
 
