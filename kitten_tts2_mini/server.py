@@ -88,14 +88,31 @@ class SynthesisService:
             raise RuntimeError("Model returned empty or non-finite audio")
         return np.clip(np.rint(samples * 32768), -32768, 32767).astype("<i2").tobytes()
 
+    # Stream model chunks with the same 150 ms gap used by generate().
+    # Related files: requirements.txt, config.yaml.
+    def synthesize_stream(self, text, voice_id):
+        language, voice = self.voices[voice_id]
+        first = True
+        for chunk in self.model.generate_stream(
+            text, voice=voice, language=language, speed=self.speed
+        ):
+            samples = np.asarray(chunk, dtype=np.float32).reshape(-1)
+            if not samples.size or not np.isfinite(samples).all():
+                raise RuntimeError("Model returned empty or non-finite audio")
+            if not first:
+                yield bytes(int(0.15 * self.model.sample_rate) * 2)
+            first = False
+            yield np.clip(np.rint(samples * 32768), -32768, 32767).astype("<i2").tobytes()
+
 
 class WyomingHandler(AsyncEventHandler):
     """Handle Describe and Synthesize requests on a Wyoming connection."""
 
-    def __init__(self, reader, writer, *, service, executor):
+    def __init__(self, reader, writer, *, service, executor, synthesis_lock):
         super().__init__(reader, writer)
         self.service = service
         self.executor = executor
+        self.synthesis_lock = synthesis_lock
         self.stream_started = False
 
     async def handle_event(self, event):
@@ -126,18 +143,26 @@ class WyomingHandler(AsyncEventHandler):
             await self.write_event(Error("Empty text or unknown voice", "invalid_request").event())
             return False
 
-        try:
-            loop = asyncio.get_running_loop()
-            pcm = await loop.run_in_executor(self.executor, self.service.synthesize, text, voice_id)
-        except (Exception, SystemExit) as error:
-            LOG.error("Synthesis failed (%s)", type(error).__name__)
-            await self.write_event(Error("Speech synthesis failed", "synthesis_failed").event())
-            return False
-
         audio_format = {"rate": self.service.model.sample_rate, "width": 2, "channels": 1}
-        await self.write_event(AudioStart(**audio_format).event())
-        for offset in range(0, len(pcm), 8192):
-            await self.write_event(AudioChunk(audio=pcm[offset:offset + 8192], **audio_format).event())
+        loop = asyncio.get_running_loop()
+        async with self.synthesis_lock:
+            chunks = self.service.synthesize_stream(text, voice_id)
+            try:
+                pcm = await loop.run_in_executor(self.executor, next, chunks, None)
+                if pcm is None:
+                    raise RuntimeError("Model returned empty audio")
+                await self.write_event(AudioStart(**audio_format).event())
+                while pcm is not None:
+                    for offset in range(0, len(pcm), 8192):
+                        await self.write_event(AudioChunk(audio=pcm[offset:offset + 8192], **audio_format).event())
+                    pcm = await loop.run_in_executor(self.executor, next, chunks, None)
+            except (Exception, SystemExit) as error:
+                LOG.error("Synthesis failed (%s)", type(error).__name__)
+                await self.write_event(Error("Speech synthesis failed", "synthesis_failed").event())
+                return False
+            finally:
+                # The executor owns the generator, including during cancellation.
+                await loop.run_in_executor(self.executor, chunks.close)
         await self.write_event(AudioStop().event())
         return True
 
@@ -178,7 +203,9 @@ async def run_server(host, options):
             await loop.run_in_executor(
                 executor, service.synthesize, text, voice_id
             )
-        handler = partial(WyomingHandler, service=service, executor=executor)
+        handler = partial(
+            WyomingHandler, service=service, executor=executor, synthesis_lock=asyncio.Lock()
+        )
         await server.start(handler)
         LOG.info("Wyoming listening on %s:%d (default voice: %s)", host, PORT, service.default_voice)
         try:

@@ -21,6 +21,8 @@ Kitten TTS 2 Mini를 Home Assistant OS의 Assist에서 음성 합성 엔진으�
 
 옵션을 저장한 뒤 앱을 재시작합니다. Assist에서 음성을 선택하면 해당 음성을 사용합니다.
 
+긴 응답은 전체 텍스트를 받은 후 모델이 생성한 오디오 조각부터 순서대로 전송합니다. 실제 재생 시작 시점은 Assist 클라이언트의 버퍼링 방식에 따라 달라집니다.
+
 ## 관련 문서
 
 - [Home Assistant 로컬 앱 개발](https://contributors.home-assistant.io/apps/)
